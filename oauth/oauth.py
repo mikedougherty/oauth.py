@@ -38,8 +38,12 @@ SIGNATURE_METHOD = 'PLAINTEXT'
 
 class OAuthError(RuntimeError):
     """Generic exception class."""
-    def __init__(self, message='OAuth error occured.'):
+    def __init__(self, message='OAuth error occured.', oauth_data = None):
+        self.oauth_data = oauth_data or {}
         self.message = message
+
+    def __repr__(self):
+        return RuntimeError.__repr__(self) + ": " + self.message
 
 def build_authenticate_header(realm=''):
     """Optional WWW-Authenticate header (401 error)"""
@@ -133,21 +137,25 @@ class OAuthToken(object):
         if self.callback_confirmed is not None:
             data['oauth_callback_confirmed'] = self.callback_confirmed
         return urllib.urlencode(data)
- 
-    def from_string(s):
+
+    @classmethod
+    def from_string(cls, s):
         """ Returns a token from something like:
         oauth_token_secret=xxx&oauth_token=xxx
         """
         params = cgi.parse_qs(s, keep_blank_values=False)
-        key = params['oauth_token'][0]
-        secret = params['oauth_token_secret'][0]
-        token = OAuthToken(key, secret)
+        key = params.get('oauth_token', [None])[0]
+        secret = params.get('oauth_token_secret', [None])[0]
+
+        if None in (key, secret):
+            raise OAuthError("No token found: %r" % s, s)
+
+        token = cls(key, secret)
         try:
-            token.callback_confirmed = params['oauth_callback_confirmed'][0]
+            token.callback_confirmed = params.get('oauth_callback_confirmed', [None])[0]
         except KeyError:
-            pass # 1.0, no callback confirmed.
+            pass  # 1.0, no callback confirmed.
         return token
-    from_string = staticmethod(from_string)
 
     def __str__(self):
         return self.to_string()
@@ -333,7 +341,8 @@ class OAuthRequest(object):
         if not parameters:
             parameters = {}
 
-        parameters['oauth_token'] = token.key
+        if token and token.key:
+            parameters['oauth_token'] = token.key
 
         if callback:
             parameters['oauth_callback'] = callback
